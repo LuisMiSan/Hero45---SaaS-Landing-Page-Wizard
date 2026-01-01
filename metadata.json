@@ -1,0 +1,8 @@
+{
+  "name": "Hero45 - SaaS Landing Page Wizard",
+  "description": "A high-performance landing page builder and project wizard powered by Gemini AI, featuring multi-modal generation, video understanding, and real-time voice interactions.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
