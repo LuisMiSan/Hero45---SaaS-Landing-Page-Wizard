@@ -44,9 +44,14 @@ export class GeminiService {
 
   async generateBase44Prompt(project: any) {
     const ai = this.getAI();
+    
+    // Eliminamos la imagen thumbnail del contexto para evitar superar el límite de tokens (1M).
+    // La imagen en base64 es muy pesada y no es necesaria para generar las especificaciones técnicas.
+    const { thumbnail, ...cleanProject } = project;
+
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
-      contents: `Act as a senior full-stack engineer. Generate a technical Base44 specification for this project: ${JSON.stringify(project)}. Include copywriting hooks, database schema, and technical stack recommendations.`,
+      contents: `Act as a senior full-stack engineer. Generate a technical Base44 specification for this project: ${JSON.stringify(cleanProject)}. Include copywriting hooks, database schema, and technical stack recommendations.`,
       config: {
         thinkingConfig: { thinkingBudget: 16000 },
         systemInstruction: "Format the output as a professional technical brief with sections for Copywriting, Architecture, and Data Schema.",
