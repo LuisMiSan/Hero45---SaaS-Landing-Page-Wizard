@@ -23,7 +23,7 @@ const Sidebar: React.FC<{ onReset: () => void }> = ({ onReset }) => {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <aside className="w-72 h-full flex flex-col bg-background-dark border-r border-white/5 shrink-0 z-20 hidden md:flex">
+    <aside className="w-72 h-full flex flex-col bg-background-dark border-r border-white/5 shrink-0 z-20 hidden md:flex print:hidden">
       <div className="p-8 pb-2">
         <div className="flex items-center gap-3 mb-10">
           <div className="bg-primary rounded-2xl size-12 flex items-center justify-center shadow-2xl shadow-primary/40">
@@ -334,63 +334,90 @@ const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) 
     }
   }, [project]);
 
+  const handleExportJSON = () => {
+    if (!project) return;
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(project, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `${project.title.replace(/\s+/g, '_').toLowerCase()}_hero45.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleDownloadPDF = () => {
+    window.print();
+  };
+
   if (!project) return null;
 
   return (
-    <div className="flex-1 flex flex-col items-center py-16 px-8 bg-background-dark overflow-y-auto">
-      <div className="max-w-5xl w-full flex flex-col gap-12">
+    <div className="flex-1 flex flex-col items-center py-16 px-8 bg-background-dark overflow-y-auto print:bg-white print:text-black print:overflow-visible print:h-auto">
+      <div className="max-w-5xl w-full flex flex-col gap-12 print:gap-6">
         <div className="flex items-start justify-between">
           <div className="flex flex-col gap-3">
-            <div className="bg-primary/20 text-primary px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-primary/20 w-fit">Resultado Final</div>
-            <h1 className="text-5xl font-black text-white">{project.title}</h1>
+            <div className="bg-primary/20 text-primary px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-primary/20 w-fit print:border-black print:text-black">Resultado Final</div>
+            <h1 className="text-5xl font-black text-white print:text-black">{project.title}</h1>
           </div>
-          <button onClick={() => navigate('/')} className="bg-white text-black px-8 py-3 rounded-xl font-black text-sm hover:bg-slate-200 transition-all">Ir a la Librería</button>
+          <button onClick={() => navigate('/')} className="bg-white text-black px-8 py-3 rounded-xl font-black text-sm hover:bg-slate-200 transition-all print:hidden">Ir a la Librería</button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-          <div className="lg:col-span-2 flex flex-col gap-6">
-             <div className="aspect-video rounded-[3rem] overflow-hidden border border-white/5 shadow-2xl relative group bg-surface-dark">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 print:block">
+          <div className="lg:col-span-2 flex flex-col gap-6 print:mb-8">
+             <div className="aspect-video rounded-[3rem] overflow-hidden border border-white/5 shadow-2xl relative group bg-surface-dark print:border-black/10 print:shadow-none">
                 <img src={project.thumbnail} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-10">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-10 print:hidden">
                    <p className="text-white text-sm font-bold opacity-60">Previsualización del concepto visual generado por IA</p>
                 </div>
              </div>
-             <div className="bg-surface-darker rounded-[2rem] border border-white/5 p-8 flex flex-col gap-4">
-                <h3 className="text-primary font-black text-xs uppercase tracking-widest flex items-center gap-2">
+             <div className="bg-surface-darker rounded-[2rem] border border-white/5 p-8 flex flex-col gap-4 print:bg-transparent print:border-black/20 print:p-0 print:mt-4">
+                <h3 className="text-primary font-black text-xs uppercase tracking-widest flex items-center gap-2 print:text-black">
                   <span className="material-symbols-outlined text-sm">terminal</span> Prompt Técnico Base44
                 </h3>
+                
+                {/* Textarea for screen, Div for print to ensure full content is visible */}
                 <textarea 
                   readOnly 
-                  className="w-full h-64 bg-transparent border-none focus:ring-0 text-slate-400 font-mono text-xs leading-relaxed" 
+                  className="w-full h-64 bg-transparent border-none focus:ring-0 text-slate-400 font-mono text-xs leading-relaxed print:hidden resize-none" 
                   value={fullPrompt || "// Generando especificaciones técnicas..."}
                 />
+                <div className="hidden print:block text-black font-mono text-xs whitespace-pre-wrap leading-relaxed border-t border-black/10 pt-4">
+                    {fullPrompt}
+                </div>
              </div>
           </div>
           
-          <div className="flex flex-col gap-8">
-            <div className="bg-surface-dark p-8 rounded-[2rem] border border-white/5 space-y-6 shadow-xl">
+          <div className="flex flex-col gap-8 print:block print:break-inside-avoid">
+            <div className="bg-surface-dark p-8 rounded-[2rem] border border-white/5 space-y-6 shadow-xl print:bg-transparent print:shadow-none print:border print:border-black/20 print:mb-6">
                <div className="flex items-center justify-between">
-                  <h4 className="text-white font-black text-lg">Blueprint IA</h4>
-                  <button onClick={() => navigate(`/edit/${project.id}`)} className="text-primary hover:text-white transition-colors">
+                  <h4 className="text-white font-black text-lg print:text-black">Blueprint IA</h4>
+                  <button onClick={() => navigate(`/edit/${project.id}`)} className="text-primary hover:text-white transition-colors print:hidden">
                     <span className="material-symbols-outlined">edit</span>
                   </button>
                </div>
                <div className="space-y-4">
                   {project.architecture.map(id => (
-                    <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5">
-                       <span className="material-symbols-outlined text-primary text-sm">{COMPONENTS.find(c => c.id === id)?.icon || 'view_module'}</span>
-                       <span className="text-xs font-bold text-slate-300">{COMPONENTS.find(c => c.id === id)?.name || id}</span>
+                    <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 print:border-black/20 print:bg-transparent">
+                       <span className="material-symbols-outlined text-primary text-sm print:text-black">{COMPONENTS.find(c => c.id === id)?.icon || 'view_module'}</span>
+                       <span className="text-xs font-bold text-slate-300 print:text-black">{COMPONENTS.find(c => c.id === id)?.name || id}</span>
                     </div>
                   ))}
                </div>
             </div>
             
-            <div className="bg-primary/10 border border-primary/20 p-8 rounded-[2rem] space-y-4">
+            <div className="bg-primary/10 border border-primary/20 p-8 rounded-[2rem] space-y-4 print:hidden">
                <h4 className="text-primary font-black text-lg">¿Qué sigue?</h4>
                <p className="text-xs text-slate-400 leading-relaxed">Este proyecto ha sido inyectado en tu base de datos local. Puedes clonarlo, editarlo o exportar el JSON para integrarlo en tu flujo de desarrollo.</p>
-               <div className="flex gap-2">
-                 <button onClick={() => navigate(`/edit/${project.id}`)} className="flex-1 py-4 bg-white/5 border border-white/10 rounded-xl font-black text-xs text-white uppercase tracking-widest hover:bg-white/10">Editar</button>
-                 <button className="flex-1 py-4 bg-primary rounded-xl font-black text-xs text-white uppercase tracking-widest shadow-xl">Exportar</button>
+               <div className="grid grid-cols-2 gap-2">
+                 <button onClick={() => navigate(`/edit/${project.id}`)} className="col-span-2 py-3 bg-white/5 border border-white/10 rounded-xl font-black text-xs text-white uppercase tracking-widest hover:bg-white/10 transition-colors">
+                    Editar
+                 </button>
+                 <button onClick={handleExportJSON} className="py-3 bg-primary rounded-xl font-black text-xs text-white uppercase tracking-widest shadow-xl hover:bg-primary-dark transition-colors flex items-center justify-center gap-2">
+                    <span className="material-symbols-outlined text-sm">javascript</span> JSON
+                 </button>
+                 <button onClick={handleDownloadPDF} className="py-3 bg-white text-black rounded-xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">
+                    <span className="material-symbols-outlined text-sm">picture_as_pdf</span> PDF
+                 </button>
                </div>
             </div>
           </div>
@@ -518,9 +545,9 @@ const App: React.FC = () => {
 
   return (
     <HashRouter>
-      <div className="flex h-screen overflow-hidden bg-background-dark text-white font-display">
+      <div className="flex h-screen overflow-hidden bg-background-dark text-white font-display print:overflow-visible print:h-auto print:block">
         <Sidebar onReset={() => {}} />
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 print:h-auto print:overflow-visible print:block">
           <Routes>
             <Route path="/" element={
               <DashboardScreen 

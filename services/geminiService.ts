@@ -13,13 +13,13 @@ export class GeminiService {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Build a powerful high-conversion architecture for: "${objective}". 
-      Return ONLY a comma-separated list of IDs from these: hero-1, hero-v, feat-grid, logos, pricing.
-      Choose at least 3-4 components in a logical order (e.g., hero, features, trust, conversion).`,
+      Return ONLY a comma-separated list of IDs from these: hero-1, hero-v, feat-grid, logos, testimonials, catalog, pricing, faq, footer.
+      Choose at least 3-6 components in a logical order (e.g., hero, features, trust, conversion, footer).`,
       config: {
         systemInstruction: "You are a master of conversion rate optimization (CRO). Your goal is to select the most powerful structure for any business objective.",
       }
     });
-    return response.text?.split(',').map(s => s.trim()) || ['hero-1', 'feat-grid', 'pricing'];
+    return response.text?.split(',').map(s => s.trim()) || ['hero-1', 'feat-grid', 'pricing', 'footer'];
   }
 
   async generateStylePreview(style: string, objective: string) {

@@ -86,7 +86,11 @@ export const COMPONENTS = [
   { id: 'hero-v', name: 'Hero Video', group: 'Headers', icon: 'video_library' },
   { id: 'feat-grid', name: 'Feature Grid 3x2', group: 'Value Prop', icon: 'grid_view' },
   { id: 'logos', name: 'Client Logos', group: 'Trust', icon: 'verified' },
-  { id: 'pricing', name: 'Pricing Table', group: 'Conversion', icon: 'payments' }
+  { id: 'testimonials', name: 'Testimonios', group: 'Trust', icon: 'forum' },
+  { id: 'catalog', name: 'Catálogo', group: 'Content', icon: 'category' },
+  { id: 'pricing', name: 'Pricing Table', group: 'Conversion', icon: 'payments' },
+  { id: 'faq', name: 'Preguntas Frecuentes', group: 'Support', icon: 'help_center' },
+  { id: 'footer', name: 'Footer', group: 'Structure', icon: 'call_to_action' }
 ];
 
 export const INTEGRATIONS = [
