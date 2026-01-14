@@ -23,7 +23,7 @@ const Sidebar: React.FC<{ onReset: () => void }> = ({ onReset }) => {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <aside className="w-72 h-full flex flex-col bg-background-dark border-r border-white/5 shrink-0 z-20 hidden md:flex print:hidden">
+    <aside className="w-72 h-full flex flex-col bg-background-dark border-r border-white/5 shrink-0 z-20 hidden md:flex print:hidden no-print">
       <div className="p-8 pb-2">
         <div className="flex items-center gap-3 mb-10">
           <div className="bg-primary rounded-2xl size-12 flex items-center justify-center shadow-2xl shadow-primary/40">
@@ -45,6 +45,11 @@ const Sidebar: React.FC<{ onReset: () => void }> = ({ onReset }) => {
           <Link to="/create" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive('/create') ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
             <span className="material-symbols-outlined">auto_awesome</span>
             <span className="text-sm font-bold">Generador IA</span>
+          </Link>
+
+          <Link to="/admin" className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all mt-4 border-t border-white/5 ${isActive('/admin') ? 'bg-white/5 text-white' : 'text-slate-500 hover:text-white'}`}>
+             <span className="material-symbols-outlined">admin_panel_settings</span>
+             <span className="text-sm font-bold">Admin / DB</span>
           </Link>
         </nav>
       </div>
@@ -124,7 +129,7 @@ const FastCreator: React.FC<{ onFinalize: (p: ProjectState, thumb: string) => vo
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-grid-pattern overflow-y-auto">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-grid-pattern overflow-y-auto print:hidden">
       <div className="max-w-3xl w-full flex flex-col gap-10">
         <div className="text-center flex flex-col gap-4">
           <h1 className="text-6xl font-black text-white tracking-tighter leading-tight">Generación <span className="text-primary italic">Instantánea</span></h1>
@@ -236,7 +241,7 @@ const EditorScreen: React.FC<{ projects: SavedProject[], onUpdate: (p: SavedProj
   if (!project) return null;
 
   return (
-    <div className="flex-1 flex flex-col bg-background-dark overflow-hidden">
+    <div className="flex-1 flex flex-col bg-background-dark overflow-hidden print:hidden">
       <header className="px-8 py-6 border-b border-white/5 flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-black text-white">Editar Proyecto</h2>
@@ -322,6 +327,180 @@ const EditorScreen: React.FC<{ projects: SavedProject[], onUpdate: (p: SavedProj
   );
 };
 
+// --- Admin / Database Screen ---
+
+const AdminScreen: React.FC<{ projects: SavedProject[], setProjects: React.Dispatch<React.SetStateAction<SavedProject[]>> }> = ({ projects, setProjects }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportDB = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projects, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `hero45_backup_${new Date().toISOString().slice(0,10)}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImportClick = () => {
+    if (fileInputRef.current) {
+        fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const json = JSON.parse(content);
+
+        if (Array.isArray(json)) {
+          // Basic validation checking for ID and Title
+          const validProjects = json.filter(p => p.id && p.title);
+          
+          if (validProjects.length === 0) {
+            alert("No se encontraron proyectos válidos en el archivo.");
+            return;
+          }
+
+          let updatedList = [];
+          if(confirm(`Se han encontrado ${validProjects.length} proyectos. ¿Deseas reemplazar tu base de datos actual o fusionarlos?\n\nAceptar = FUSIONAR (Mantiene los existentes)\nCancelar = REEMPLAZAR TOTALMENTE (Borra los actuales)`)) {
+             // Merge logic: Add only if ID doesn't exist to prevent duplicates
+             const currentIds = new Set(projects.map(p => p.id));
+             const newProjects = validProjects.filter(p => !currentIds.has(p.id));
+             updatedList = [...newProjects, ...projects];
+             alert(`${newProjects.length} proyectos nuevos importados.`);
+          } else {
+             // Replace logic
+             updatedList = validProjects;
+             alert("Base de datos reemplazada con éxito.");
+          }
+
+          // IMPORTANT: Save directly to localStorage immediately to prevent data loss if useEffect hasn't run yet
+          localStorage.setItem(LIST_KEY, JSON.stringify(updatedList));
+          // Update React State
+          setProjects(updatedList);
+          
+        } else {
+          alert("El archivo JSON no tiene el formato correcto (debe ser un array de proyectos).");
+        }
+      } catch (err: any) {
+        console.error(err);
+        alert("Error al leer el archivo. Asegúrate de que sea un JSON válido generado por esta aplicación.\n\nDetalle: " + err.message);
+      } finally {
+        // Reset input value so the same file can be selected again if needed
+        if (event.target) {
+            event.target.value = '';
+        }
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClearDB = () => {
+    if(confirm("¡PELIGRO! ¿Estás seguro de que quieres borrar TODOS los proyectos? Esta acción no se puede deshacer.")) {
+        setProjects([]);
+        localStorage.removeItem(LIST_KEY);
+    }
+  }
+
+  return (
+    <div className="flex-1 flex flex-col bg-background-dark p-10 overflow-y-auto print:hidden">
+        <h2 className="text-3xl font-black text-white mb-2">Administrador de Base de Datos</h2>
+        <p className="text-slate-400 mb-8">Gestiona, respalda y restaura tus proyectos generados.</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+            <div className="bg-surface-dark border border-white/5 p-6 rounded-2xl flex flex-col gap-4">
+                <div className="size-12 rounded-full bg-primary/20 flex items-center justify-center text-primary">
+                    <span className="material-symbols-outlined">download</span>
+                </div>
+                <div>
+                    <h3 className="text-white font-bold">Exportar Backup</h3>
+                    <p className="text-xs text-slate-500 mt-1">Descarga un archivo .json con todos tus proyectos.</p>
+                </div>
+                <button onClick={handleExportDB} className="mt-auto w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-black text-white uppercase tracking-widest transition-colors">
+                    Descargar DB
+                </button>
+            </div>
+
+            <div className="bg-surface-dark border border-white/5 p-6 rounded-2xl flex flex-col gap-4 relative">
+                <div className="size-12 rounded-full bg-green-500/20 flex items-center justify-center text-green-500">
+                    <span className="material-symbols-outlined">upload</span>
+                </div>
+                <div>
+                    <h3 className="text-white font-bold">Importar / Restaurar</h3>
+                    <p className="text-xs text-slate-500 mt-1">Sube un backup .json para recuperar tus proyectos.</p>
+                </div>
+                
+                {/* Hidden input needs to be part of the DOM */}
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileChange} 
+                    accept=".json" 
+                    className="hidden" 
+                    id="db-upload-input"
+                />
+                <button 
+                    onClick={handleImportClick} 
+                    className="mt-auto w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-black text-white uppercase tracking-widest transition-colors cursor-pointer"
+                >
+                    Subir Archivo
+                </button>
+            </div>
+
+            <div className="bg-surface-dark border border-red-500/10 p-6 rounded-2xl flex flex-col gap-4">
+                <div className="size-12 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">
+                    <span className="material-symbols-outlined">delete_forever</span>
+                </div>
+                <div>
+                    <h3 className="text-white font-bold">Purga Total</h3>
+                    <p className="text-xs text-slate-500 mt-1">Elimina todos los registros de la memoria del navegador.</p>
+                </div>
+                <button onClick={handleClearDB} className="mt-auto w-full py-3 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-xl text-xs font-black text-red-500 uppercase tracking-widest transition-colors">
+                    Borrar Todo
+                </button>
+            </div>
+        </div>
+
+        <h3 className="text-xl font-black text-white mb-6">Registro de Datos ({projects.length})</h3>
+        <div className="bg-surface-dark border border-white/5 rounded-2xl overflow-hidden">
+            <table className="w-full text-left">
+                <thead className="bg-white/5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <tr>
+                        <th className="p-4">ID</th>
+                        <th className="p-4">Proyecto</th>
+                        <th className="p-4">Fecha</th>
+                        <th className="p-4">Estilo</th>
+                        <th className="p-4">Módulos</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                    {projects.map(p => (
+                        <tr key={p.id} className="hover:bg-white/5 transition-colors">
+                            <td className="p-4 text-xs font-mono text-slate-500">{p.id.slice(0, 8)}...</td>
+                            <td className="p-4 text-sm font-bold text-white">{p.title}</td>
+                            <td className="p-4 text-xs text-slate-400">{new Date(p.createdAt).toLocaleDateString()}</td>
+                            <td className="p-4 text-xs text-slate-400 capitalize">{p.visualStyle}</td>
+                            <td className="p-4 text-xs text-slate-400">{p.architecture.length}</td>
+                        </tr>
+                    ))}
+                    {projects.length === 0 && (
+                        <tr>
+                            <td colSpan={5} className="p-8 text-center text-slate-500 text-sm">Base de datos vacía.</td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+        </div>
+    </div>
+  );
+};
+
 // --- Success Screen ---
 
 const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) => {
@@ -352,52 +531,45 @@ const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) 
   if (!project) return null;
 
   return (
-    <div className="flex-1 flex flex-col items-center py-16 px-8 bg-background-dark overflow-y-auto print:bg-white print:text-black print:overflow-visible print:h-auto">
-      <div className="max-w-5xl w-full flex flex-col gap-12 print:gap-6">
-        <div className="flex items-start justify-between">
+    <div className="flex-1 flex flex-col items-center py-16 px-8 bg-background-dark overflow-y-auto print:p-0 print:block">
+      <div id="printable-content" className="max-w-5xl w-full flex flex-col gap-12 print:gap-4 print:max-w-full">
+        <div className="flex items-start justify-between print:mb-4">
           <div className="flex flex-col gap-3">
-            <div className="bg-primary/20 text-primary px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-primary/20 w-fit print:border-black print:text-black">Resultado Final</div>
+            <div className="bg-primary/20 text-primary px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-primary/20 w-fit print:border-black print:text-black print:bg-transparent print:p-0">Resultado Final</div>
             <h1 className="text-5xl font-black text-white print:text-black">{project.title}</h1>
           </div>
-          <button onClick={() => navigate('/')} className="bg-white text-black px-8 py-3 rounded-xl font-black text-sm hover:bg-slate-200 transition-all print:hidden">Ir a la Librería</button>
+          <button onClick={() => navigate('/')} className="bg-white text-black px-8 py-3 rounded-xl font-black text-sm hover:bg-slate-200 transition-all print:hidden no-print">Ir a la Librería</button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 print:block">
-          <div className="lg:col-span-2 flex flex-col gap-6 print:mb-8">
-             <div className="aspect-video rounded-[3rem] overflow-hidden border border-white/5 shadow-2xl relative group bg-surface-dark print:border-black/10 print:shadow-none">
-                <img src={project.thumbnail} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-10 print:hidden">
-                   <p className="text-white text-sm font-bold opacity-60">Previsualización del concepto visual generado por IA</p>
-                </div>
+          <div className="lg:col-span-2 flex flex-col gap-6 print:mb-8 print:block">
+             <div className="aspect-video rounded-[3rem] overflow-hidden border border-white/5 shadow-2xl relative group bg-surface-dark print:border-black print:shadow-none print:rounded-none print:aspect-auto print:mb-4">
+                <img src={project.thumbnail} className="w-full h-full object-cover print:max-h-96 print:object-contain" />
              </div>
-             <div className="bg-surface-darker rounded-[2rem] border border-white/5 p-8 flex flex-col gap-4 print:bg-transparent print:border-black/20 print:p-0 print:mt-4">
-                <h3 className="text-primary font-black text-xs uppercase tracking-widest flex items-center gap-2 print:text-black">
+             <div className="bg-surface-darker rounded-[2rem] border border-white/5 p-8 flex flex-col gap-4 print:bg-transparent print:border-none print:p-0 print:block">
+                <h3 className="text-primary font-black text-xs uppercase tracking-widest flex items-center gap-2 print:text-black print:mt-4 print:border-b print:border-black print:pb-2 print:mb-2">
                   <span className="material-symbols-outlined text-sm">terminal</span> Prompt Técnico Base44
                 </h3>
                 
-                {/* Textarea for screen, Div for print to ensure full content is visible */}
                 <textarea 
                   readOnly 
-                  className="w-full h-64 bg-transparent border-none focus:ring-0 text-slate-400 font-mono text-xs leading-relaxed print:hidden resize-none" 
+                  className="w-full h-64 bg-transparent border-none focus:ring-0 text-slate-400 font-mono text-xs leading-relaxed print:hidden resize-none no-print" 
                   value={fullPrompt || "// Generando especificaciones técnicas..."}
                 />
-                <div className="hidden print:block text-black font-mono text-xs whitespace-pre-wrap leading-relaxed border-t border-black/10 pt-4">
+                <div className="hidden print:block text-black font-mono text-[10px] whitespace-pre-wrap leading-relaxed">
                     {fullPrompt}
                 </div>
              </div>
           </div>
           
           <div className="flex flex-col gap-8 print:block print:break-inside-avoid">
-            <div className="bg-surface-dark p-8 rounded-[2rem] border border-white/5 space-y-6 shadow-xl print:bg-transparent print:shadow-none print:border print:border-black/20 print:mb-6">
-               <div className="flex items-center justify-between">
+            <div className="bg-surface-dark p-8 rounded-[2rem] border border-white/5 space-y-6 shadow-xl print:bg-transparent print:shadow-none print:border print:border-black print:rounded-lg print:mb-6 print:block">
+               <div className="flex items-center justify-between print:mb-4">
                   <h4 className="text-white font-black text-lg print:text-black">Blueprint IA</h4>
-                  <button onClick={() => navigate(`/edit/${project.id}`)} className="text-primary hover:text-white transition-colors print:hidden">
-                    <span className="material-symbols-outlined">edit</span>
-                  </button>
                </div>
-               <div className="space-y-4">
+               <div className="space-y-4 print:grid print:grid-cols-2 print:gap-2 print:space-y-0">
                   {project.architecture.map(id => (
-                    <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 print:border-black/20 print:bg-transparent">
+                    <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 print:border-black print:bg-transparent print:rounded-md print:p-2 break-inside-avoid">
                        <span className="material-symbols-outlined text-primary text-sm print:text-black">{COMPONENTS.find(c => c.id === id)?.icon || 'view_module'}</span>
                        <span className="text-xs font-bold text-slate-300 print:text-black">{COMPONENTS.find(c => c.id === id)?.name || id}</span>
                     </div>
@@ -405,7 +577,7 @@ const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) 
                </div>
             </div>
             
-            <div className="bg-primary/10 border border-primary/20 p-8 rounded-[2rem] space-y-4 print:hidden">
+            <div className="bg-primary/10 border border-primary/20 p-8 rounded-[2rem] space-y-4 print:hidden no-print">
                <h4 className="text-primary font-black text-lg">¿Qué sigue?</h4>
                <p className="text-xs text-slate-400 leading-relaxed">Este proyecto ha sido inyectado en tu base de datos local. Puedes clonarlo, editarlo o exportar el JSON para integrarlo en tu flujo de desarrollo.</p>
                <div className="grid grid-cols-2 gap-2">
@@ -416,7 +588,7 @@ const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) 
                     <span className="material-symbols-outlined text-sm">javascript</span> JSON
                  </button>
                  <button onClick={handleDownloadPDF} className="py-3 bg-white text-black rounded-xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">
-                    <span className="material-symbols-outlined text-sm">picture_as_pdf</span> PDF
+                    <span className="material-symbols-outlined text-sm">picture_as_pdf</span> IMPRIMIR / GUARDAR PDF
                  </button>
                </div>
             </div>
@@ -432,7 +604,7 @@ const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) 
 const DashboardScreen: React.FC<{ projects: SavedProject[], onOpenProject: (p: SavedProject) => void, onDeleteProject: (id: string) => void }> = ({ projects, onOpenProject, onDeleteProject }) => {
   const navigate = useNavigate();
   return (
-    <main className="flex-1 flex flex-col h-full bg-background-dark overflow-hidden relative">
+    <main className="flex-1 flex flex-col h-full bg-background-dark overflow-hidden relative print:hidden">
       <header className="px-10 py-8 flex flex-col md:flex-row md:items-center justify-between gap-8 border-b border-white/5 z-10">
         <div>
           <h2 className="text-4xl font-black text-white tracking-tighter">Mi Librería</h2>
@@ -559,6 +731,7 @@ const App: React.FC = () => {
             <Route path="/create" element={<FastCreator onFinalize={handleFinalize} />} />
             <Route path="/success" element={<SuccessScreen project={lastGenerated} />} />
             <Route path="/edit/:id" element={<EditorScreen projects={projects} onUpdate={updateProject} />} />
+            <Route path="/admin" element={<AdminScreen projects={projects} setProjects={setProjects} />} />
           </Routes>
         </div>
       </div>

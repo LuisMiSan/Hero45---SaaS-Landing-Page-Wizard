@@ -197,7 +197,7 @@ export const LiveAssistant: React.FC = () => {
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 print:hidden">
       {isActive && (
         <div className="bg-surface-dark border border-primary/30 p-4 rounded-2xl shadow-2xl w-64 animate-in slide-in-from-bottom-4">
           <div className="flex items-center gap-3 mb-2">

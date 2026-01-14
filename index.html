@@ -60,6 +60,77 @@
                               linear-gradient(to bottom, #292348 1px, transparent 1px);
             background-size: 40px 40px;
         }
+        
+        @media print {
+            @page {
+                margin: 0.5cm;
+                size: auto;
+            }
+            
+            /* GLOBAL RESET FOR PRINT */
+            html, body {
+                width: 100% !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: visible !important;
+                background-color: white !important;
+            }
+
+            /* Hide everything by default */
+            body * {
+                visibility: hidden;
+            }
+
+            /* Only show the specific printable content */
+            #printable-content, #printable-content * {
+                visibility: visible;
+            }
+
+            /* Position the printable content absolutely to take over the page */
+            #printable-content {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 20px;
+                background-color: white !important;
+                color: black !important;
+                display: block !important;
+            }
+
+            /* Ensure text contrast */
+            #printable-content * {
+                color: black !important;
+                background-color: transparent !important;
+                box-shadow: none !important;
+                text-shadow: none !important;
+            }
+            
+            /* Images */
+            #printable-content img {
+                max-width: 100% !important;
+                height: auto !important;
+                display: block !important;
+                page-break-inside: avoid;
+            }
+
+            /* Borders for structure */
+            .border, .border-b, .border-t {
+                border-color: #ddd !important;
+            }
+
+            /* Hide elements explicitly marked to hide in print */
+            .print\:hidden {
+                display: none !important;
+            }
+            
+            /* Ensure blocks are blocks */
+            .print\:block {
+                display: block !important;
+            }
+        }
     </style>
 <script type="importmap">
 {
@@ -73,7 +144,7 @@
 }
 </script>
 </head>
-<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white h-screen overflow-hidden print:overflow-visible print:h-auto">
-    <div id="root" class="h-full print:h-auto print:overflow-visible"></div>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white h-screen overflow-hidden">
+    <div id="root" class="h-full"></div>
 </body>
 </html>
