@@ -6,8 +6,62 @@ import { ProjectState, SavedProject } from './types.ts';
 import { gemini } from './services/geminiService.ts';
 import { LiveAssistant } from './components/LiveAssistant.tsx';
 
-const DRAFT_KEY = 'HERO45_PROJECT_DRAFT';
-const LIST_KEY = 'HERO45_PROJECTS_LIST';
+const LIST_KEY = 'HERO45_PROJECTS_LIST_V2'; // Versioned key to avoid conflicts
+
+// --- PERSISTENCE LAYER ---
+const StorageManager = {
+  save: (data: SavedProject[]) => {
+    const json = JSON.stringify(data);
+    
+    // Layer 1: Local Storage (Standard)
+    try { localStorage.setItem(LIST_KEY, json); } catch(e) { console.error("LS Save fail", e); }
+    
+    // Layer 2: Session Storage (Survives refreshes better in dev envs)
+    try { sessionStorage.setItem(LIST_KEY, json); } catch(e) { console.error("SS Save fail", e); }
+    
+    // Layer 3: Window Name (Survives domain redirects often)
+    try { 
+        // We use a safe wrapper to not nuke other window name data if it exists
+        const currentData = window.name && window.name.startsWith('{') ? JSON.parse(window.name) : {};
+        currentData[LIST_KEY] = data;
+        window.name = JSON.stringify(currentData);
+    } catch(e) {
+        // Fallback simple write
+        try { window.name = JSON.stringify({ [LIST_KEY]: data }); } catch(z){}
+    }
+  },
+
+  load: (): SavedProject[] => {
+    let candidates: SavedProject[][] = [];
+    
+    // Try Local Storage
+    try {
+        const ls = localStorage.getItem(LIST_KEY);
+        if (ls) candidates.push(JSON.parse(ls));
+    } catch(e){}
+
+    // Try Session Storage
+    try {
+        const ss = sessionStorage.getItem(LIST_KEY);
+        if (ss) candidates.push(JSON.parse(ss));
+    } catch(e){}
+
+    // Try Window Name
+    try {
+        const wn = window.name ? JSON.parse(window.name) : {};
+        if (wn[LIST_KEY] && Array.isArray(wn[LIST_KEY])) {
+            candidates.push(wn[LIST_KEY]);
+        }
+    } catch(e){}
+
+    if (candidates.length === 0) return [];
+
+    // Return the candidate with the most items (Safest bet against partial wipes)
+    candidates.sort((a, b) => b.length - a.length);
+    console.log(`Hero45: Recovered ${candidates[0].length} projects from storage.`);
+    return candidates[0];
+  }
+};
 
 const DEFAULT_PROJECT_STATE: ProjectState = {
   objective: '',
@@ -18,7 +72,7 @@ const DEFAULT_PROJECT_STATE: ProjectState = {
 
 // --- Shared Components ---
 
-const Sidebar: React.FC<{ onReset: () => void }> = ({ onReset }) => {
+const Sidebar: React.FC<{ onReset: () => void, onBackup: () => void }> = ({ onReset, onBackup }) => {
   const location = useLocation();
   const isActive = (path: string) => location.pathname === path;
 
@@ -55,6 +109,14 @@ const Sidebar: React.FC<{ onReset: () => void }> = ({ onReset }) => {
       </div>
       
       <div className="mt-auto p-8">
+        <button 
+          onClick={onBackup}
+          className="w-full flex items-center gap-3 px-4 py-3 mb-4 rounded-xl bg-surface-highlight border border-white/5 text-xs font-bold text-slate-300 hover:text-white hover:bg-white/10 transition-all"
+        >
+           <span className="material-symbols-outlined text-sm">save</span>
+           BACKUP JSON
+        </button>
+
         <div className="p-5 rounded-2xl bg-gradient-to-br from-surface-highlight to-transparent border border-white/5 mb-6">
           <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-2">Estado del Motor</p>
           <div className="flex items-center gap-2">
@@ -81,7 +143,14 @@ const FastCreator: React.FC<{ onFinalize: (p: ProjectState, thumb: string) => vo
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState('');
+  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
   const navigate = useNavigate();
+
+  const toggleComponent = (id: string) => {
+    setSelectedComponents(prev => 
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    );
+  };
 
   const handleGenerate = async () => {
     if (!prompt) return;
@@ -103,8 +172,19 @@ const FastCreator: React.FC<{ onFinalize: (p: ProjectState, thumb: string) => vo
     }, 1200);
 
     try {
-      // 1. Suggest architecture
-      const arch = await gemini.suggestArchitecture(prompt);
+      let arch: string[] = [];
+      
+      // Decision Logic: Manual override vs AI Suggestion
+      if (selectedComponents.length > 0) {
+        // Use user selection, but sort it by the global component list order
+        // This ensures the layout structure remains logical (e.g. Hero first, Footer last) 
+        // regardless of the order the user clicked them.
+        arch = COMPONENTS.filter(c => selectedComponents.includes(c.id)).map(c => c.id);
+      } else {
+        // 1. Suggest architecture (AI Mode)
+        arch = await gemini.suggestArchitecture(prompt);
+      }
+
       // 2. Pick a style
       const style = VISUAL_STYLES[Math.floor(Math.random() * VISUAL_STYLES.length)].id;
       // 3. Generate thumbnail
@@ -143,10 +223,42 @@ const FastCreator: React.FC<{ onFinalize: (p: ProjectState, thumb: string) => vo
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               disabled={isGenerating}
-              className="w-full min-h-[160px] bg-transparent border-none text-white text-2xl font-medium focus:ring-0 placeholder:text-slate-700 resize-none no-scrollbar"
+              className="w-full min-h-[120px] bg-transparent border-none text-white text-2xl font-medium focus:ring-0 placeholder:text-slate-700 resize-none no-scrollbar"
               placeholder="Ej: Una landing para un SaaS de gestión de flotas con tono profesional y oscuro..."
             />
             
+            {/* Component Selector */}
+            <div className="mt-4 border-t border-white/5 pt-6 pb-2">
+                <div className="flex items-center justify-between mb-4">
+                    <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                       <span className="material-symbols-outlined text-sm">tune</span> 
+                       Blueprint IA <span className={selectedComponents.length > 0 ? "text-primary" : "text-slate-600"}>({selectedComponents.length > 0 ? 'Manual' : 'Automático'})</span>
+                    </label>
+                    {selectedComponents.length > 0 && (
+                        <button onClick={() => setSelectedComponents([])} className="text-[10px] text-primary hover:text-white transition-colors font-bold uppercase">
+                            Restaurar Automático
+                        </button>
+                    )}
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {COMPONENTS.map(c => (
+                        <button
+                            key={c.id}
+                            onClick={() => toggleComponent(c.id)}
+                            disabled={isGenerating}
+                            className={`text-left px-3 py-2 rounded-lg border text-[10px] font-bold transition-all flex items-center gap-2 disabled:opacity-50 ${
+                                selectedComponents.includes(c.id)
+                                ? 'bg-primary/20 border-primary text-white'
+                                : 'bg-white/5 border-transparent text-slate-500 hover:bg-white/10 hover:text-slate-300'
+                            }`}
+                        >
+                            <span className="material-symbols-outlined text-sm">{c.icon}</span>
+                            {c.name}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
             <div className="flex items-center justify-between mt-6 pt-6 border-t border-white/5">
               <div className="flex gap-2">
                 {['SaaS', 'App', 'Portfolio'].map(tag => (
@@ -215,7 +327,19 @@ const EditorScreen: React.FC<{ projects: SavedProject[], onUpdate: (p: SavedProj
       setVisualStyle(found.visualStyle);
       setArchitecture(found.architecture);
     } else {
-      navigate('/');
+      // If project not found in current state, try loading from StorageManager directly as fallback before redirecting
+      // This helps if deep linking into edit page after a hard refresh
+      const freshData = StorageManager.load();
+      const freshFound = freshData.find(p => p.id === id);
+      if (freshFound) {
+          setProject(freshFound);
+          setTitle(freshFound.title);
+          setObjective(freshFound.objective);
+          setVisualStyle(freshFound.visualStyle);
+          setArchitecture(freshFound.architecture);
+      } else {
+          navigate('/');
+      }
     }
   }, [id, projects, navigate]);
 
@@ -329,7 +453,7 @@ const EditorScreen: React.FC<{ projects: SavedProject[], onUpdate: (p: SavedProj
 
 // --- Admin / Database Screen ---
 
-const AdminScreen: React.FC<{ projects: SavedProject[], setProjects: React.Dispatch<React.SetStateAction<SavedProject[]>> }> = ({ projects, setProjects }) => {
+const AdminScreen: React.FC<{ projects: SavedProject[], setProjects: React.Dispatch<React.SetStateAction<SavedProject[]>>, onClear: () => void, onImport: (d: SavedProject[]) => void }> = ({ projects, setProjects, onClear, onImport }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportDB = () => {
@@ -344,6 +468,7 @@ const AdminScreen: React.FC<{ projects: SavedProject[], setProjects: React.Dispa
 
   const handleImportClick = () => {
     if (fileInputRef.current) {
+        fileInputRef.current.value = ''; // Reset to allow re-selection
         fileInputRef.current.click();
     }
   };
@@ -356,46 +481,68 @@ const AdminScreen: React.FC<{ projects: SavedProject[], setProjects: React.Dispa
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        const json = JSON.parse(content);
-
-        if (Array.isArray(json)) {
-          // Basic validation checking for ID and Title
-          const validProjects = json.filter(p => p.id && p.title);
-          
-          if (validProjects.length === 0) {
-            alert("No se encontraron proyectos válidos en el archivo.");
+        let json;
+        try {
+            json = JSON.parse(content);
+        } catch (parseErr) {
+            alert("El archivo seleccionado no es un JSON válido.");
             return;
-          }
-
-          let updatedList = [];
-          if(confirm(`Se han encontrado ${validProjects.length} proyectos. ¿Deseas reemplazar tu base de datos actual o fusionarlos?\n\nAceptar = FUSIONAR (Mantiene los existentes)\nCancelar = REEMPLAZAR TOTALMENTE (Borra los actuales)`)) {
-             // Merge logic: Add only if ID doesn't exist to prevent duplicates
-             const currentIds = new Set(projects.map(p => p.id));
-             const newProjects = validProjects.filter(p => !currentIds.has(p.id));
-             updatedList = [...newProjects, ...projects];
-             alert(`${newProjects.length} proyectos nuevos importados.`);
-          } else {
-             // Replace logic
-             updatedList = validProjects;
-             alert("Base de datos reemplazada con éxito.");
-          }
-
-          // IMPORTANT: Save directly to localStorage immediately to prevent data loss if useEffect hasn't run yet
-          localStorage.setItem(LIST_KEY, JSON.stringify(updatedList));
-          // Update React State
-          setProjects(updatedList);
-          
-        } else {
-          alert("El archivo JSON no tiene el formato correcto (debe ser un array de proyectos).");
         }
+        
+        // 1. Normalize input to Array
+        let candidates: any[] = [];
+        if (Array.isArray(json)) {
+            candidates = json;
+        } else if (typeof json === 'object' && json !== null) {
+            candidates = [json];
+        }
+
+        if (candidates.length === 0) {
+            alert("No se encontraron datos en el archivo.");
+            return;
+        }
+
+        // 2. Auto-repair and validate projects
+        const repairedProjects: SavedProject[] = candidates.map((p, index) => {
+            // Heuristic: Must have at least one meaningful field to be considered a project
+            const isProjectLike = p.objective || p.architecture || p.visualStyle || p.title || p.id;
+            
+            if (!isProjectLike) return null;
+
+            // Restore/Default missing fields
+            return {
+                id: p.id || `restored_${Date.now()}_${index}`,
+                title: p.title || (p.objective ? p.objective.slice(0, 20) + '...' : `Proyecto Importado ${index + 1}`),
+                objective: p.objective || '',
+                visualStyle: p.visualStyle || 'human',
+                architecture: Array.isArray(p.architecture) ? p.architecture : [],
+                integrations: Array.isArray(p.integrations) ? p.integrations : [],
+                createdAt: p.createdAt || Date.now(),
+                thumbnail: p.thumbnail || '' // Allowed to be empty
+            } as SavedProject;
+        }).filter(Boolean) as SavedProject[];
+
+        if (repairedProjects.length === 0) {
+            alert("El archivo no contiene proyectos válidos de Hero45.");
+            return;
+        }
+
+        // 3. Merge Logic (Add new, skip duplicates by ID)
+        const currentIds = new Set(projects.map(p => p.id));
+        const newProjects = repairedProjects.filter(p => !currentIds.has(p.id));
+
+        if (newProjects.length === 0) {
+            alert("Todos los proyectos del archivo ya existen en tu librería.");
+            return;
+        }
+
+        const updatedList = [...newProjects, ...projects];
+        onImport(updatedList);
+        alert(`Éxito: Se han importado ${newProjects.length} proyectos a tu librería.`);
+        
       } catch (err: any) {
         console.error(err);
-        alert("Error al leer el archivo. Asegúrate de que sea un JSON válido generado por esta aplicación.\n\nDetalle: " + err.message);
-      } finally {
-        // Reset input value so the same file can be selected again if needed
-        if (event.target) {
-            event.target.value = '';
-        }
+        alert("Error crítico al procesar el archivo: " + err.message);
       }
     };
     reader.readAsText(file);
@@ -403,8 +550,7 @@ const AdminScreen: React.FC<{ projects: SavedProject[], setProjects: React.Dispa
 
   const handleClearDB = () => {
     if(confirm("¡PELIGRO! ¿Estás seguro de que quieres borrar TODOS los proyectos? Esta acción no se puede deshacer.")) {
-        setProjects([]);
-        localStorage.removeItem(LIST_KEY);
+        onClear();
     }
   }
 
@@ -433,17 +579,16 @@ const AdminScreen: React.FC<{ projects: SavedProject[], setProjects: React.Dispa
                 </div>
                 <div>
                     <h3 className="text-white font-bold">Importar / Restaurar</h3>
-                    <p className="text-xs text-slate-500 mt-1">Sube un backup .json para recuperar tus proyectos.</p>
+                    <p className="text-xs text-slate-500 mt-1">Sube un backup .json o un proyecto individual.</p>
                 </div>
                 
-                {/* Hidden input needs to be part of the DOM */}
+                {/* Visual hidden input ensuring accessibility and functionality */}
                 <input 
                     type="file" 
                     ref={fileInputRef} 
                     onChange={handleFileChange} 
                     accept=".json" 
-                    className="hidden" 
-                    id="db-upload-input"
+                    style={{ position: 'absolute', opacity: 0, width: 1, height: 1, pointerEvents: 'none' }}
                 />
                 <button 
                     onClick={handleImportClick} 
@@ -525,59 +670,173 @@ const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) 
   };
 
   const handleDownloadPDF = () => {
-    window.print();
+    if (!project) return;
+
+    // Remove existing if any (clean start)
+    const existing = document.getElementById('print_iframe');
+    if (existing) document.body.removeChild(existing);
+
+    // Create an invisible iframe for printing
+    const iframe = document.createElement('iframe');
+    iframe.id = 'print_iframe';
+    // Use fixed/opacity method to ensure visibility for print engines but hidden from user
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-9999px'; 
+    iframe.style.top = '0px';
+    iframe.style.width = '1px';
+    iframe.style.height = '1px';
+    iframe.style.opacity = '0.01'; 
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+
+    // Get architecture names
+    const archList = project.architecture.map(id => {
+       const comp = COMPONENTS.find(c => c.id === id);
+       return comp ? `<div class="tag">${comp.icon} ${comp.name}</div>` : '';
+    }).join('');
+
+    const content = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Hero45 - ${project.title}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Fira+Code&family=Material+Symbols+Outlined" rel="stylesheet"/>
+        <style>
+          @page { margin: 2cm; size: A4; }
+          body { font-family: 'Inter', system-ui, sans-serif; padding: 40px; color: #000; background: #fff; max-width: 800px; margin: 0 auto; }
+          h1 { font-size: 36px; font-weight: 900; margin-bottom: 5px; letter-spacing: -0.05em; text-transform: uppercase; }
+          .meta { font-size: 12px; color: #666; margin-bottom: 30px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
+          
+          .image-container { margin-bottom: 30px; border-radius: 12px; overflow: hidden; border: 1px solid #ddd; }
+          img { width: 100%; height: auto; display: block; }
+          
+          .section { margin-bottom: 40px; }
+          h2 { font-size: 16px; font-weight: 900; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; text-transform: uppercase; }
+          
+          .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+          .tag { border: 1px solid #ddd; padding: 8px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; background: #f9f9f9; }
+          
+          pre { background: #f4f4f5; padding: 20px; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 11px; white-space: pre-wrap; line-height: 1.5; border: 1px solid #e4e4e7; }
+          
+          .footer { margin-top: 50px; pt: 20px; border-top: 1px solid #eee; font-size: 10px; color: #999; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <div class="meta">Hero45 Generated Report • ${new Date().toLocaleDateString()}</div>
+        <h1>${project.title}</h1>
+        <div class="meta">ID: ${project.id}</div>
+        
+        <div class="image-container">
+          <img src="${project.thumbnail}" alt="Thumbnail" />
+        </div>
+
+        <div class="section">
+           <h2>Blueprint Architecture</h2>
+           <div class="grid">
+              ${archList}
+           </div>
+        </div>
+
+        <div class="section">
+           <h2>Technical Specification (Base44)</h2>
+           <pre>${fullPrompt || "// Loading specifications..."}</pre>
+        </div>
+        
+        <div class="footer">Generated by Hero45 AI Engine</div>
+      </body>
+      </html>
+    `;
+
+    doc.open();
+    doc.write(content);
+    doc.close();
+
+    // TRIGGER PRINT LOGIC
+    // We use a dual trigger strategy: wait for load, but also force timeout
+    // This solves cases where external resources (fonts) hang or where browsers 
+    // block 'load' events on hidden iframes.
+    
+    let isPrinted = false;
+
+    const doPrint = () => {
+        if (isPrinted) return;
+        isPrinted = true;
+        
+        try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+        } catch (e) {
+            console.error("Print error:", e);
+            alert("No se pudo iniciar la impresión automática. Por favor intenta de nuevo o usa Ctrl+P.");
+        }
+
+        // Cleanup after delay
+        setTimeout(() => {
+            if (document.body.contains(iframe)) {
+                document.body.removeChild(iframe);
+            }
+        }, 3000); // Give time for the print dialog to register
+    };
+
+    iframe.onload = () => {
+        // Add small delay to ensure rendering is complete
+        setTimeout(doPrint, 300);
+    };
+
+    // Fallback trigger if onload hangs (e.g. font timeout)
+    setTimeout(doPrint, 2000);
   };
 
   if (!project) return null;
 
   return (
-    <div className="flex-1 flex flex-col items-center py-16 px-8 bg-background-dark overflow-y-auto print:p-0 print:block">
-      <div id="printable-content" className="max-w-5xl w-full flex flex-col gap-12 print:gap-4 print:max-w-full">
-        <div className="flex items-start justify-between print:mb-4">
+    <div className="flex-1 flex flex-col items-center py-16 px-8 bg-background-dark overflow-y-auto">
+      <div id="printable-content" className="max-w-5xl w-full flex flex-col gap-12">
+        <div className="flex items-start justify-between">
           <div className="flex flex-col gap-3">
-            <div className="bg-primary/20 text-primary px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-primary/20 w-fit print:border-black print:text-black print:bg-transparent print:p-0">Resultado Final</div>
-            <h1 className="text-5xl font-black text-white print:text-black">{project.title}</h1>
+            <div className="bg-primary/20 text-primary px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-primary/20 w-fit">Resultado Final</div>
+            <h1 className="text-5xl font-black text-white">{project.title}</h1>
           </div>
-          <button onClick={() => navigate('/')} className="bg-white text-black px-8 py-3 rounded-xl font-black text-sm hover:bg-slate-200 transition-all print:hidden no-print">Ir a la Librería</button>
+          <button onClick={() => navigate('/')} className="bg-white text-black px-8 py-3 rounded-xl font-black text-sm hover:bg-slate-200 transition-all no-print">Ir a la Librería</button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 print:block">
-          <div className="lg:col-span-2 flex flex-col gap-6 print:mb-8 print:block">
-             <div className="aspect-video rounded-[3rem] overflow-hidden border border-white/5 shadow-2xl relative group bg-surface-dark print:border-black print:shadow-none print:rounded-none print:aspect-auto print:mb-4">
-                <img src={project.thumbnail} className="w-full h-full object-cover print:max-h-96 print:object-contain" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+          <div className="lg:col-span-2 flex flex-col gap-6">
+             <div className="aspect-video rounded-[3rem] overflow-hidden border border-white/5 shadow-2xl relative group bg-surface-dark">
+                <img src={project.thumbnail} className="w-full h-full object-cover" />
              </div>
-             <div className="bg-surface-darker rounded-[2rem] border border-white/5 p-8 flex flex-col gap-4 print:bg-transparent print:border-none print:p-0 print:block">
-                <h3 className="text-primary font-black text-xs uppercase tracking-widest flex items-center gap-2 print:text-black print:mt-4 print:border-b print:border-black print:pb-2 print:mb-2">
+             <div className="bg-surface-darker rounded-[2rem] border border-white/5 p-8 flex flex-col gap-4">
+                <h3 className="text-primary font-black text-xs uppercase tracking-widest flex items-center gap-2">
                   <span className="material-symbols-outlined text-sm">terminal</span> Prompt Técnico Base44
                 </h3>
                 
                 <textarea 
                   readOnly 
-                  className="w-full h-64 bg-transparent border-none focus:ring-0 text-slate-400 font-mono text-xs leading-relaxed print:hidden resize-none no-print" 
+                  className="w-full h-64 bg-transparent border-none focus:ring-0 text-slate-400 font-mono text-xs leading-relaxed resize-none" 
                   value={fullPrompt || "// Generando especificaciones técnicas..."}
                 />
-                <div className="hidden print:block text-black font-mono text-[10px] whitespace-pre-wrap leading-relaxed">
-                    {fullPrompt}
-                </div>
              </div>
           </div>
           
-          <div className="flex flex-col gap-8 print:block print:break-inside-avoid">
-            <div className="bg-surface-dark p-8 rounded-[2rem] border border-white/5 space-y-6 shadow-xl print:bg-transparent print:shadow-none print:border print:border-black print:rounded-lg print:mb-6 print:block">
-               <div className="flex items-center justify-between print:mb-4">
-                  <h4 className="text-white font-black text-lg print:text-black">Blueprint IA</h4>
+          <div className="flex flex-col gap-8">
+            <div className="bg-surface-dark p-8 rounded-[2rem] border border-white/5 space-y-6 shadow-xl">
+               <div className="flex items-center justify-between">
+                  <h4 className="text-white font-black text-lg">Blueprint IA</h4>
                </div>
-               <div className="space-y-4 print:grid print:grid-cols-2 print:gap-2 print:space-y-0">
+               <div className="space-y-4">
                   {project.architecture.map(id => (
-                    <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5 print:border-black print:bg-transparent print:rounded-md print:p-2 break-inside-avoid">
-                       <span className="material-symbols-outlined text-primary text-sm print:text-black">{COMPONENTS.find(c => c.id === id)?.icon || 'view_module'}</span>
-                       <span className="text-xs font-bold text-slate-300 print:text-black">{COMPONENTS.find(c => c.id === id)?.name || id}</span>
+                    <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5">
+                       <span className="material-symbols-outlined text-primary text-sm">{COMPONENTS.find(c => c.id === id)?.icon || 'view_module'}</span>
+                       <span className="text-xs font-bold text-slate-300">{COMPONENTS.find(c => c.id === id)?.name || id}</span>
                     </div>
                   ))}
                </div>
             </div>
             
-            <div className="bg-primary/10 border border-primary/20 p-8 rounded-[2rem] space-y-4 print:hidden no-print">
+            <div className="bg-primary/10 border border-primary/20 p-8 rounded-[2rem] space-y-4 no-print">
                <h4 className="text-primary font-black text-lg">¿Qué sigue?</h4>
                <p className="text-xs text-slate-400 leading-relaxed">Este proyecto ha sido inyectado en tu base de datos local. Puedes clonarlo, editarlo o exportar el JSON para integrarlo en tu flujo de desarrollo.</p>
                <div className="grid grid-cols-2 gap-2">
@@ -588,7 +847,7 @@ const SuccessScreen: React.FC<{ project: SavedProject | null }> = ({ project }) 
                     <span className="material-symbols-outlined text-sm">javascript</span> JSON
                  </button>
                  <button onClick={handleDownloadPDF} className="py-3 bg-white text-black rounded-xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">
-                    <span className="material-symbols-outlined text-sm">picture_as_pdf</span> IMPRIMIR / GUARDAR PDF
+                    <span className="material-symbols-outlined text-sm">picture_as_pdf</span> IMPRIMIR / PDF
                  </button>
                </div>
             </div>
@@ -680,16 +939,39 @@ const DashboardScreen: React.FC<{ projects: SavedProject[], onOpenProject: (p: S
 
 const App: React.FC = () => {
   const [lastGenerated, setLastGenerated] = useState<SavedProject | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const isManualClearRef = useRef(false); // FLAG: Tracks if the user *explicitly* requested data deletion
+  
   const [projects, setProjects] = useState<SavedProject[]>(() => {
-    try {
-      const saved = localStorage.getItem(LIST_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) { return []; }
+     return StorageManager.load();
   });
 
   useEffect(() => {
-    localStorage.setItem(LIST_KEY, JSON.stringify(projects));
-  }, [projects]);
+    setIsLoaded(true);
+  }, []);
+
+  // BULLETPROOF SAVE SYSTEM
+  useEffect(() => {
+    if (!isLoaded) return; 
+    
+    // GUARD: If trying to save an empty array, check if we are about to overwrite existing data accidentally.
+    if (projects.length === 0 && !isManualClearRef.current) {
+        // Double check against storage directly
+        const stored = StorageManager.load();
+        if (stored.length > 0) {
+            console.warn("Hero45 Safety: Detected potential data wipe. Restoring data instead of saving empty.");
+            setProjects(stored); // Restore data
+            return; // Abort save
+        }
+    }
+
+    // Reset flag after successful intended save (if it was a clear)
+    if (projects.length === 0 && isManualClearRef.current) {
+        isManualClearRef.current = false;
+    }
+    
+    StorageManager.save(projects);
+  }, [projects, isLoaded]);
 
   const handleFinalize = (state: ProjectState, thumb: string) => {
     const newProject: SavedProject = {
@@ -710,15 +992,40 @@ const App: React.FC = () => {
 
   const deleteProject = (id: string) => {
     if(confirm("¿Eliminar permanentemente este registro de la base de datos?")) {
-      setProjects(prev => prev.filter(p => p.id !== id));
+      setProjects(prev => {
+        const next = prev.filter(p => p.id !== id);
+        if (next.length === 0) isManualClearRef.current = true; // Flag intention to empty DB
+        return next;
+      });
       if (lastGenerated?.id === id) setLastGenerated(null);
     }
+  };
+  
+  const clearDB = () => {
+    isManualClearRef.current = true; // Flag intention
+    setProjects([]);
+    localStorage.removeItem(LIST_KEY);
+    sessionStorage.removeItem(LIST_KEY);
+  };
+
+  const importDB = (imported: SavedProject[]) => {
+    setProjects(imported);
+  };
+
+  const manualBackup = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(projects, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `hero45_full_backup_${new Date().toISOString().slice(0,10)}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
   };
 
   return (
     <HashRouter>
       <div className="flex h-screen overflow-hidden bg-background-dark text-white font-display print:overflow-visible print:h-auto print:block">
-        <Sidebar onReset={() => {}} />
+        <Sidebar onReset={() => {}} onBackup={manualBackup} />
         <div className="flex-1 flex flex-col min-w-0 print:h-auto print:overflow-visible print:block">
           <Routes>
             <Route path="/" element={
@@ -731,7 +1038,14 @@ const App: React.FC = () => {
             <Route path="/create" element={<FastCreator onFinalize={handleFinalize} />} />
             <Route path="/success" element={<SuccessScreen project={lastGenerated} />} />
             <Route path="/edit/:id" element={<EditorScreen projects={projects} onUpdate={updateProject} />} />
-            <Route path="/admin" element={<AdminScreen projects={projects} setProjects={setProjects} />} />
+            <Route path="/admin" element={
+              <AdminScreen 
+                projects={projects} 
+                setProjects={setProjects} 
+                onClear={clearDB}
+                onImport={importDB}
+              />
+            } />
           </Routes>
         </div>
       </div>
