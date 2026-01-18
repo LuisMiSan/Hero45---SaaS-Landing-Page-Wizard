@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 export class GeminiService {
   constructor() {}
@@ -68,7 +68,7 @@ export class GeminiService {
   }) {
     const ai = this.getAI();
     return ai.live.connect({
-      model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+      model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       callbacks,
       config: {
         responseModalities: [Modality.AUDIO],

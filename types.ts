@@ -1,13 +1,4 @@
 
-export interface Template {
-  id: string;
-  title: string;
-  description: string;
-  imageUrl: string;
-  icon: string;
-  category: string;
-}
-
 export interface ProjectState {
   objective: string;
   visualStyle: string;
@@ -20,12 +11,4 @@ export interface SavedProject extends ProjectState {
   title: string;
   createdAt: number;
   thumbnail?: string;
-}
-
-export enum WizardStep {
-  Objective = 1,
-  Architecture = 2,
-  VisualStyle = 3,
-  Functionality = 4,
-  Summary = 5
 }
