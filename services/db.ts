@@ -1,185 +1,138 @@
 
 import { SavedProject } from '../types';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  getDocs, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  query, 
+  orderBy,
+  writeBatch,
+  enableIndexedDbPersistence
+} from 'firebase/firestore';
 
-const DB_NAME = 'Hero45_Database';
-const DB_VERSION = 1;
-const STORE_NAME = 'projects';
+// --- IMPORTANTE: CONFIGURACIÓN DE FIREBASE ---
+// Si ves errores en la consola, es probable que no hayas sustituido estos valores.
+// 1. Ve a https://console.firebase.google.com
+// 2. Crea un proyecto > Configuración del proyecto > General > Tus aplicaciones > SDK setup y configuración
+// 3. Copia el objeto `firebaseConfig` y reemplaza el de abajo.
+
+const firebaseConfig = {
+  apiKey: "TU_API_KEY_AQUI",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  projectId: "TU_PROJECT_ID",
+  storageBucket: "TU_PROYECTO.firebasestorage.app",
+  messagingSenderId: "TU_SENDER_ID",
+  appId: "TU_APP_ID"
+};
+
+// Inicialización
+let db: any = null;
+
+try {
+  // Validación simple para evitar errores confusos si el usuario no ha configurado Firebase
+  if (firebaseConfig.apiKey === "TU_API_KEY_AQUI") {
+      console.warn("⚠️ HERO45 WARNING: Firebase no está configurado. La base de datos no funcionará hasta que edites 'services/db.ts' con tus credenciales reales.");
+  } else {
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      
+      // Intentar habilitar persistencia offline (puede fallar si hay múltiples pestañas abiertas)
+      enableIndexedDbPersistence(db).catch((err) => {
+          if (err.code === 'failed-precondition') {
+              console.warn("Firebase Persistence: Multiple tabs open, persistence can only be enabled in one tab at a a time.");
+          } else if (err.code === 'unimplemented') {
+              console.warn("Firebase Persistence: The current browser does not support all of the features required to enable persistence");
+          }
+      });
+      console.log("✅ Firebase Connected Successfully");
+  }
+} catch (e) {
+  console.error("🔥 Error initializing Firebase:", e);
+}
+
+const COLLECTION_NAME = 'projects';
 
 class DatabaseService {
-  private db: IDBDatabase | null = null;
-
-  constructor() {
-    this.initPersistence();
-  }
-
-  // Request persistent storage to prevent browser eviction
-  private async initPersistence() {
-    if (navigator.storage && navigator.storage.persist) {
-      try {
-        const isPersisted = await navigator.storage.persist();
-        console.log(`Storage Persistence Granted: ${isPersisted}`);
-      } catch (e) {
-        console.warn("Persistence request failed", e);
-      }
-    }
-  }
-
-  private async open(): Promise<IDBDatabase> {
-    if (this.db) return this.db;
-
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-        }
-      };
-
-      request.onsuccess = (event) => {
-        this.db = (event.target as IDBOpenDBRequest).result;
-        resolve(this.db);
-      };
-
-      request.onerror = (event) => {
-        console.error("IndexedDB Open Error:", (event.target as IDBOpenDBRequest).error);
-        reject((event.target as IDBOpenDBRequest).error);
-      };
-    });
-  }
-
-  // Internal: Fetch purely from IDB
-  private async getFromIDB(): Promise<SavedProject[]> {
-    try {
-        const db = await this.open();
-        return new Promise((resolve, reject) => {
-          const transaction = db.transaction(STORE_NAME, 'readonly');
-          const store = transaction.objectStore(STORE_NAME);
-          const request = store.getAll();
-
-          request.onsuccess = () => {
-            const results = request.result as SavedProject[];
-            resolve(results || []);
-          };
-          request.onerror = () => reject(request.error);
-        });
-    } catch (e) {
-        console.error("Internal IDB Fetch Error", e);
+  
+  // Fetch from Firestore Cloud
+  async getAllProjects(): Promise<SavedProject[]> {
+    if (!db) {
+        console.warn("DB not initialized. Returning empty list.");
         return [];
     }
-  }
-
-  // Public: Fetch with Auto-Recovery strategy
-  async getAllProjects(): Promise<SavedProject[]> {
-    // 1. Try IndexedDB
-    let items = await this.getFromIDB();
-    
-    // 2. If empty, check LocalStorage Mirror (Safety Net)
-    if (items.length === 0) {
-        const mirror = localStorage.getItem('hero45_mirror');
-        if (mirror) {
-            try {
-                const recovered = JSON.parse(mirror);
-                if (Array.isArray(recovered) && recovered.length > 0) {
-                    console.warn("⚠️ IndexedDB was empty. Recovering data from LocalStorage Mirror.");
-                    
-                    // Re-populate IndexedDB immediately
-                    await this.importBulk(recovered);
-                    return recovered.sort((a, b) => b.createdAt - a.createdAt);
-                }
-            } catch (e) {
-                console.error("Mirror recovery failed", e);
-            }
-        }
+    try {
+      const q = query(collection(db, COLLECTION_NAME), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => doc.data() as SavedProject);
+    } catch (e) {
+      console.error("Firebase Read Error:", e);
+      return [];
     }
-
-    // 3. Always update LocalStorage Mirror with what we found (if we found something new in IDB that wasn't in LS)
-    if (items.length > 0) {
-        this.updateMirror(items);
-    }
-
-    return items.sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  private updateMirror(projects: SavedProject[]) {
-      try {
-          localStorage.setItem('hero45_mirror', JSON.stringify(projects));
-      } catch (e) {
-          // If quota exceeded, try removing thumbnails
-          try {
-              const lean = projects.map(p => ({ ...p, thumbnail: '' }));
-              localStorage.setItem('hero45_mirror', JSON.stringify(lean));
-              console.warn("LocalStorage full, saved lean mirror (no images).");
-          } catch (e2) {
-              console.error("LocalStorage completely full", e2);
-          }
-      }
-  }
-
+  // Save to Firestore Cloud
   async saveProject(project: SavedProject): Promise<void> {
-    const db = await this.open();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.put(project);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-
-    // Sync to mirror
-    const all = await this.getFromIDB();
-    this.updateMirror(all);
+    if (!db) {
+        alert("Error: Firebase no está configurado. No se pueden guardar datos.");
+        return;
+    }
+    try {
+      // Use setDoc with merge to create or update
+      await setDoc(doc(db, COLLECTION_NAME, project.id), project, { merge: true });
+    } catch (e) {
+      console.error("Firebase Save Error:", e);
+      throw e;
+    }
   }
 
+  // Delete from Firestore Cloud
   async deleteProject(id: string): Promise<void> {
-    const db = await this.open();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.delete(id);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-
-    // Sync to mirror
-    const all = await this.getFromIDB();
-    this.updateMirror(all);
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, COLLECTION_NAME, id));
+    } catch (e) {
+      console.error("Firebase Delete Error:", e);
+      throw e;
+    }
   }
 
+  // Batch delete (Clear DB)
   async clearDatabase(): Promise<void> {
-    const db = await this.open();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.clear();
+    if (!db) return;
+    try {
+        const q = query(collection(db, COLLECTION_NAME));
+        const snapshot = await getDocs(q);
+        const batch = writeBatch(db);
+        
+        snapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+        });
 
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-
-    // Clear mirror
-    localStorage.removeItem('hero45_mirror');
+        await batch.commit();
+    } catch(e) {
+        console.error("Firebase Clear Error", e);
+    }
   }
   
+  // Batch import
   async importBulk(projects: SavedProject[]): Promise<void> {
-    const db = await this.open();
-    await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(STORE_NAME, 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
+    if (!db) return;
+    try {
+        const batch = writeBatch(db);
         
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-
         projects.forEach(project => {
-            store.put(project);
+        const ref = doc(db, COLLECTION_NAME, project.id);
+        batch.set(ref, project);
         });
-    });
 
-    // Update mirror
-    this.updateMirror(projects);
+        await batch.commit();
+    } catch(e) {
+        console.error("Firebase Import Error", e);
+    }
   }
 }
 
